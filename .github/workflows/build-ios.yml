@@ -36,7 +36,7 @@ jobs:
         run: sudo gem install xcodeproj --no-document
       - name: Patch project.hxp to disable code signing
         run: |
-          sed -i '' 's/config.set("ios.team-id", IOS_TEAM_ID);/config.set("ios.team-id", "");/' project.hxp
+          sed -i '' 's/config.set("ios.team-id", IOS_TEAM_ID);/config.set("ios.team-id", "NONE");/' project.hxp
           grep -n "team-id" project.hxp
       - name: List Xcode version
         run: xcodebuild -version
@@ -61,6 +61,9 @@ jobs:
           head -1 Funkin.xcodeproj/project.pbxproj
           echo "=== plutil lint (before fix) ==="
           plutil -lint Funkin.xcodeproj/project.pbxproj 2>&1 || true
+          echo "=== Fixing empty values in pbxproj ==="
+          sed -i '' 's/DevelopmentTeam = ;/DevelopmentTeam = "NONE";/g' Funkin.xcodeproj/project.pbxproj
+          sed -i '' 's/CODE_SIGN_IDENTITY = ;/CODE_SIGN_IDENTITY = "";/g' Funkin.xcodeproj/project.pbxproj
           echo "=== Fixing pbxproj with Ruby xcodeproj gem ==="
           ruby -e '
             require "xcodeproj"
