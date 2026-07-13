@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-ios:
-    runs-on: macos-13
+    runs-on: macos-latest
     timeout-minutes: 120
 
     steps:
@@ -43,8 +43,13 @@ jobs:
           cd $(haxelib path hxcpp | sed "s/,//g")/tools/hxcpp
           haxe compile.hxml
 
-      - name: Build for iOS
-        run: haxelib run lime build ios -release --times
+      - name: Build for iOS (no signing)
+        env:
+          CODE_SIGNING_ALLOWED: NO
+          CODE_SIGNING_REQUIRED: NO
+          CODE_SIGN_IDENTITY: ""
+          DEVELOPMENT_TEAM: ""
+        run: haxelib run lime build ios -release -D nosign --times
         timeout-minutes: 60
 
       - name: Package IPA
