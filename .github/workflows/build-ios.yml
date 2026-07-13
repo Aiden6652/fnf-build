@@ -35,6 +35,13 @@ jobs:
       - name: Install Haxe dependencies
         run: haxelib run hmm install --quiet
         timeout-minutes: 30
+      - name: Build hxcpp tool
+        run: |
+          HXCPP_PATH=$(haxelib path hxcpp 2>/dev/null | head -1)
+          echo "hxcpp at: $HXCPP_PATH"
+          cd "$HXCPP_PATH/tools/hxcpp"
+          haxe compile.hxml
+          echo "hxcpp tool built successfully"
       - name: Install xcodeproj gem
         run: sudo gem install xcodeproj --no-document
       - name: Patch project.hxp to disable code signing
