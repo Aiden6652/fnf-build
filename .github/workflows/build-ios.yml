@@ -36,24 +36,17 @@ jobs:
         run: |
           sed -i '' 's/config.set("ios.team-id", IOS_TEAM_ID);/config.set("ios.team-id", "");/' project.hxp
           grep -n "team-id" project.hxp
-      - name: Patch lime to remove -allowProvisioningUpdates
+      - name: Find and patch lime source
         run: |
-          # Find lime source directory properly
           echo "=== Finding lime source ==="
-          LIME_DIR=$(dirname $(dirname $(haxelib path lime 2>/dev/null | head -1)))
-          echo "Lime ndll parent: $LIME_DIR"
-          # Search in .haxelib directory (project-local)
-          find .haxelib -name "*.py" -o -name "*.n" 2>/dev/null | head -10 || true
-          # Search for the string in all files under .haxelib
+          find .haxelib -type f -name "*.py" 2>/dev/null | head -10 || true
           echo "=== Searching for allowProvisioningUpdates ==="
-          grep -rl "allowProvisioningUpdates" .haxelib/ 2>/dev/null || echo "Not found in .haxelib"
-          grep -rl "allowProvisioningUpdates" ~/haxelib/ 2>/dev/null || echo "Not found in ~/haxelib"
-          # Patch any files found
+          grep -rl "allowProvisioningUpdates" .haxelib/ ~/haxelib/ 2>/dev/null || echo "Not found anywhere"
           grep -rl "allowProvisioningUpdates" .haxelib/ ~/haxelib/ 2>/dev/null | while read f; do
             echo "Patching: $f"
             sed -i '' 's/ -allowProvisioningUpdates//g; s/ -allowProvisioningDeviceRegistration//g' "$f"
           done
-          echo "=== Verifying patch ==="
+          echo "=== Verifying ==="
           grep -rl "allowProvisioningUpdates" .haxelib/ ~/haxelib/ 2>/dev/null || echo "All patched!"
       - name: List available Xcode versions
         run: |
@@ -85,16 +78,10 @@ jobs:
           wc -lc Funkin.xcodeproj/project.pbxproj 2>/dev/null || true
           echo "=== Trying plutil convert to XML ==="
           cp Funkin.xcodeproj/project.pbxproj Funkin.xcodeproj/project.pbxproj.bak
-          plutil -convert xml1 Funkin.xcodeproj/project.pbxproj 2>&1 && echo "Converted to XML" || echo "XML conversion failed"
+          plutil -convert xml1 Funkin.xcodeproj/project.pbxproj 2>&1 && echo "Converted to XML OK" || echo "XML conversion failed"
           echo "=== Creating project.xcworkspace ==="
           mkdir -p Funkin.xcodeproj/project.xcworkspace
-          cat > Funkin.xcodeproj/project.xcworkspace/contents.xcworkspacedata << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<Workspace version = "1.0">
-   <FileRef location = "self:">
-   </FileRef>
-</Workspace>
-EOF
+          printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<Workspace version = "1.0">' '   <FileRef location = "self:"/>' '</Workspace>' > Funkin.xcodeproj/project.xcworkspace/contents.xcworkspacedata
           echo "Created xcworkspacedata"
           echo "=== xcodebuild -list ==="
           xcodebuild -list -project Funkin.xcodeproj 2>&1 || true
@@ -103,21 +90,12 @@ EOF
         run: |
           cd export/release/ios
           echo "=== Running xcodebuild manually ==="
-          xcodebuild -configuration Release \
-            -project Funkin.xcodeproj \
-            -sdk iphoneos \
-            build \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM="" \
-            PROVISIONING_PROFILE_SPECIFIER="" 2>&1
+          xcodebuild -configuration Release -project Funkin.xcodeproj -sdk iphoneos build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" PROVISIONING_PROFILE_SPECIFIER="" 2>&1
       - name: Package IPA
         if: always()
         run: |
           APP_PATH=""
-          for f in export/release/ios/build/Release-iphoneos/Funkin.app \
-                   export/release/ios/build/Release-iphoneos/*.app; do
+          for f in export/release/ios/build/Release-iphoneos/Funkin.app export/release/ios/build/Release-iphoneos/*.app; do
             if [ -d "$f" ]; then
               APP_PATH="$f"
               break
