@@ -1,15 +1,15 @@
-name: Build FNF iOS IPA
+name: Build FNF iOS IPA (macos-14)
 on:
   workflow_dispatch:
   push:
     branches: [main]
 jobs:
   build-ios:
-    runs-on: macos-13
+    runs-on: macos-14
     timeout-minutes: 120
     env:
-      NEKOPATH: /usr/local/lib/neko
-      HAXE_STD_PATH: /usr/local/lib/haxe/std
+      NEKOPATH: /opt/homebrew/lib/neko
+      HAXE_STD_PATH: /opt/homebrew/lib/haxe/std
     steps:
       - uses: actions/checkout@v4
       - name: Clone asset and art repos
@@ -20,8 +20,8 @@ jobs:
         run: |
           brew install neko
           brew install haxe
-          echo "NEKOPATH=/usr/local/lib/neko" >> $GITHUB_ENV
-          echo "HAXE_STD_PATH=/usr/local/lib/haxe/std" >> $GITHUB_ENV
+          echo "NEKOPATH=/opt/homebrew/lib/neko" >> $GITHUB_ENV
+          echo "HAXE_STD_PATH=/opt/homebrew/lib/haxe/std" >> $GITHUB_ENV
           haxe --version
           mkdir -p ~/haxelib
           haxelib setup ~/haxelib
@@ -38,83 +38,53 @@ jobs:
           grep -n "team-id" project.hxp
       - name: Find and patch lime source
         run: |
-          echo "=== Finding lime source ==="
-          find .haxelib -type f -name "*.py" 2>/dev/null | head -10 || true
           echo "=== Searching for allowProvisioningUpdates ==="
-          grep -rl "allowProvisioningUpdates" .haxelib/ ~/haxelib/ 2>/dev/null || echo "Not found anywhere"
+          grep -rl "allowProvisioningUpdates" .haxelib/ ~/haxelib/ 2>/dev/null || echo "Not found"
           grep -rl "allowProvisioningUpdates" .haxelib/ ~/haxelib/ 2>/dev/null | while read f; do
             echo "Patching: $f"
             sed -i '' 's/ -allowProvisioningUpdates//g; s/ -allowProvisioningDeviceRegistration//g' "$f"
           done
-          echo "=== Verifying ==="
-          grep -rl "allowProvisioningUpdates" .haxelib/ ~/haxelib/ 2>/dev/null || echo "All patched!"
-      - name: List available Xcode versions
-        run: |
-          ls -d /Applications/Xcode*.app 2>/dev/null || true
-          xcodebuild -version
-          xcrun --sdk iphoneos --show-sdk-version 2>/dev/null || true
+      - name: List Xcode version
+        run: xcodebuild -version
       - name: Build for iOS (lime build, may fail at xcodebuild)
         continue-on-error: true
-        id: lime_build
         env:
           CODE_SIGNING_ALLOWED: NO
           CODE_SIGNING_REQUIRED: NO
           CODE_SIGN_IDENTITY: ""
           DEVELOPMENT_TEAM: ""
-          PROVISIONING_PROFILE_SPECIFIER: ""
         run: haxelib run lime build ios -release -D nosign --times
         timeout-minutes: 90
-      - name: Diagnose and fix Xcode project
+      - name: Diagnose and fix pbxproj
         if: always()
         run: |
           cd export/release/ios
-          echo "=== Xcode project contents ==="
-          ls -laR Funkin.xcodeproj/ 2>/dev/null || echo "No xcodeproj"
           echo "=== plutil lint ==="
           plutil -lint Funkin.xcodeproj/project.pbxproj 2>&1 || true
-          echo "=== pbxproj first 5 lines ==="
-          head -5 Funkin.xcodeproj/project.pbxproj 2>/dev/null || true
-          echo "=== pbxproj size ==="
-          wc -lc Funkin.xcodeproj/project.pbxproj 2>/dev/null || true
-          echo "=== Trying plutil convert to XML ==="
+          echo "=== Converting pbxproj to XML ==="
           cp Funkin.xcodeproj/project.pbxproj Funkin.xcodeproj/project.pbxproj.bak
-          plutil -convert xml1 Funkin.xcodeproj/project.pbxproj 2>&1 && echo "Converted to XML OK" || echo "XML conversion failed"
-          echo "=== Creating project.xcworkspace ==="
+          plutil -convert xml1 Funkin.xcodeproj/project.pbxproj 2>&1 && echo "XML OK" || echo "XML failed"
+          echo "=== Creating xcworkspace ==="
           mkdir -p Funkin.xcodeproj/project.xcworkspace
           printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<Workspace version = "1.0">' '   <FileRef location = "self:"/>' '</Workspace>' > Funkin.xcodeproj/project.xcworkspace/contents.xcworkspacedata
-          echo "Created xcworkspacedata"
           echo "=== xcodebuild -list ==="
           xcodebuild -list -project Funkin.xcodeproj 2>&1 || true
       - name: Manual xcodebuild
-        id: manual_xcodebuild
         run: |
           cd export/release/ios
-          echo "=== Running xcodebuild manually ==="
           xcodebuild -configuration Release -project Funkin.xcodeproj -sdk iphoneos build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" PROVISIONING_PROFILE_SPECIFIER="" 2>&1
       - name: Package IPA
         if: always()
         run: |
-          APP_PATH=""
-          for f in export/release/ios/build/Release-iphoneos/Funkin.app export/release/ios/build/Release-iphoneos/*.app; do
-            if [ -d "$f" ]; then
-              APP_PATH="$f"
-              break
-            fi
-          done
+          APP_PATH=$(find export/release/ios/build -name "*.app" -type d 2>/dev/null | head -1)
           if [ -z "$APP_PATH" ]; then
-            APP_PATH=$(find export/release/ios/build -name "*.app" -type d 2>/dev/null | head -1)
-          fi
-          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
-            echo "ERROR: No .app found!"
+            echo "ERROR: No .app found"
             find export/release/ios -name "*.app" -type d 2>/dev/null || true
-            find export/release/ios/build -type d -maxdepth 3 2>/dev/null || true
             ls -laR export/release/ios/build/ 2>/dev/null | head -80 || true
             exit 1
           fi
-          echo "Found app: $APP_PATH"
-          ls -la "$APP_PATH/"
-          mkdir -p Payload
-          cp -r "$APP_PATH" Payload/
+          echo "Found: $APP_PATH"
+          mkdir -p Payload && cp -r "$APP_PATH" Payload/
           zip -r FNF_0.7.4_iOS.ipa Payload
           ls -lh FNF_0.7.4_iOS.ipa
       - name: Upload IPA artifact
