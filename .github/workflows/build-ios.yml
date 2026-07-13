@@ -15,8 +15,8 @@ jobs:
       - name: Clone asset and art repos
         run: |
           mkdir -p assets
-          curl -sL https://github.com/FunkinCrew/Funkin.assets/archive/ca4d97554f9e.tar.gz | tar xz --strip-components=1 -C assets
-          echo "Assets cloned at commit ca4d97554f9e"
+          curl -sL https://github.com/FunkinCrew/Funkin.assets/archive/55f9d24e9dc4.tar.gz | tar xz --strip-components=1 -C assets
+          echo "Assets cloned at commit 55f9d24e9dc4"
           ls assets/exclude/data/ui/chart-editor/toolboxes/metadata.xml
           git clone --depth 1 https://github.com/FunkinCrew/Funkin.art art
       - name: Install Haxe and Neko via Homebrew
