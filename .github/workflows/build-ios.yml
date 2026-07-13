@@ -1,5 +1,4 @@
 name: Build FNF iOS IPA
-
 on:
   workflow_dispatch:
   push:
@@ -7,51 +6,47 @@ on:
 
 jobs:
   build-ios:
-    runs-on: macos-latest
+    runs-on: macos-13
     timeout-minutes: 120
-    env:
-      NEKOPATH: /opt/homebrew/lib/neko
-      HAXE_STD_PATH: /opt/homebrew/lib/haxe/std
-
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Clone asset and art repos
         run: |
           git clone --depth 1 https://github.com/FunkinCrew/Funkin.assets assets
           git clone --depth 1 https://github.com/FunkinCrew/Funkin.art art
 
-      - name: Install Haxe and Neko via Homebrew
+      - name: Install Haxe
+        uses: krdlab/setup-haxe@v1
+        with:
+          haxe-version: 4.3.6
+
+      - name: Setup haxelib
         run: |
-          brew install neko
-          brew install haxe
-          echo "NEKOPATH=/opt/homebrew/lib/neko" >> $GITHUB_ENV
-          echo "HAXE_STD_PATH=/opt/homebrew/lib/haxe/std" >> $GITHUB_ENV
-          haxe --version
           mkdir -p ~/haxelib
           haxelib setup ~/haxelib
 
-      - name: Install hmm (dependency manager)
+      - name: Install hmm
         run: |
           haxelib --global install hmm --quiet
           haxelib --global run hmm setup
 
-      - name: Install Haxe dependencies
+      - name: Install deps
         run: haxelib run hmm install --quiet
         timeout-minutes: 30
 
-      - name: Compile hxcpp tools
+      - name: Compile hxcpp
         run: |
           cd $(haxelib path hxcpp | sed "s/,//g")/tools/hxcpp
           haxe compile.hxml
 
-      - name: Build for iOS (no signing)
+      - name: Build iOS (no signing)
         env:
           CODE_SIGNING_ALLOWED: NO
           CODE_SIGNING_REQUIRED: NO
           CODE_SIGN_IDENTITY: ""
           DEVELOPMENT_TEAM: ""
+          HXCPP_NO_COLORED_OUTPUT: "1"
         run: haxelib run lime build ios -release -D nosign --times
         timeout-minutes: 60
 
@@ -59,21 +54,22 @@ jobs:
         run: |
           APP_PATH="export/release/ios/build/Release-iphoneos/Funkin.app"
           if [ ! -d "$APP_PATH" ]; then
-            echo "App not found at default path, searching..."
+            echo "App not found at $APP_PATH, searching..."
+            find export/release/ios/build -name "Funkin.app" -type d 2>/dev/null || true
+            find export -name "*.app" -type d 2>/dev/null || true
             APP_PATH=$(find export -name "Funkin.app" -type d 2>/dev/null | head -1)
             if [ -z "$APP_PATH" ]; then
-              echo "ERROR: Funkin.app not found"
-              find export -name "*.app" -type d 2>/dev/null || true
+              echo "ERROR: Funkin.app not found anywhere"
               exit 1
             fi
           fi
-          echo "Found: $APP_PATH"
+          echo "Found app at: $APP_PATH"
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
           zip -r FNF_0.7.4_iOS.ipa Payload/
           ls -lh FNF_0.7.4_iOS.ipa
 
-      - name: Upload IPA artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: FNF_0.7.4_iOS
