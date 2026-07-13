@@ -14,7 +14,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Clone asset and art repos
         run: |
-          git clone --depth 1 https://github.com/FunkinCrew/Funkin.assets assets
+          git init assets
+          cd assets
+          git remote add origin https://github.com/FunkinCrew/Funkin.assets
+          git fetch --depth 1 origin ca4d97554f9e
+          git checkout FETCH_HEAD
+          cd ..
           git clone --depth 1 https://github.com/FunkinCrew/Funkin.art art
       - name: Install Haxe and Neko via Homebrew
         run: |
@@ -79,7 +84,6 @@ jobs:
           echo "=== xcodebuild -list ==="
           xcodebuild -list -project Funkin.xcodeproj 2>&1 || true
       - name: Manual xcodebuild
-        if: always()
         run: |
           if [ ! -d export/release/ios ]; then
             echo "ERROR: No export directory"
@@ -88,7 +92,6 @@ jobs:
           cd export/release/ios
           xcodebuild -configuration Release -project Funkin.xcodeproj -sdk iphoneos build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" PROVISIONING_PROFILE_SPECIFIER="" 2>&1
       - name: Package IPA
-        if: always()
         run: |
           APP_PATH=$(find export/release/ios/build -name "*.app" -type d 2>/dev/null | head -1)
           if [ -z "$APP_PATH" ]; then
@@ -102,7 +105,6 @@ jobs:
           zip -r FNF_0.7.4_iOS.ipa Payload
           ls -lh FNF_0.7.4_iOS.ipa
       - name: Upload IPA artifact
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: FNF_0.7.4_iOS
