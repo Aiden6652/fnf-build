@@ -1,5 +1,4 @@
 name: Build FNF iOS IPA
-
 on:
   workflow_dispatch:
   push:
@@ -7,92 +6,70 @@ on:
 
 jobs:
   build-ios:
-    runs-on: macos-latest
+    runs-on: macos-13
     timeout-minutes: 120
-
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Clone asset and art repos
         run: |
           git clone --depth 1 https://github.com/FunkinCrew/Funkin.assets assets
           git clone --depth 1 https://github.com/FunkinCrew/Funkin.art art
 
-      - name: Install Haxe manually
-        run: |
-          # Download Haxe 4.3.6 for macOS (works on ARM64 via Rosetta 2)
-          curl -L https://github.com/HaxeFoundation/haxe/releases/download/4.3.6/haxe-4.3.6-darwin.tar.gz -o /tmp/haxe.tar.gz
-          tar xzf /tmp/haxe.tar.gz -C /tmp
-          ls -la /tmp/haxe_4.3.6/
-          echo "/tmp/haxe_4.3.6" >> $GITHUB_PATH
-          # Install Neko (Haxe runtime dependency)
-          curl -L https://github.com/HaxeFoundation/neko/releases/download/v2.3.0/neko-2.3.0-darwin.tar.gz -o /tmp/neko.tar.gz
-          tar xzf /tmp/neko.tar.gz -C /tmp
-          ls -la /tmp/neko-2.3.0-darwin/
-          echo "/tmp/neko-2.3.0-darwin" >> $GITHUB_PATH
-          echo "NEKO_INSTALLED=true" >> $GITHUB_ENV
-
-      - name: Verify Haxe installation
-        run: |
-          export PATH="/tmp/haxe_4.3.6:/tmp/neko-2.3.0-darwin:$PATH"
-          haxe --version
-          neko --version
+      - name: Install Haxe
+        uses: krdlab/setup-haxe@v1
+        with:
+          haxe-version: 4.3.6
 
       - name: Setup haxelib
         run: |
-          export PATH="/tmp/haxe_4.3.6:/tmp/neko-2.3.0-darwin:$PATH"
           mkdir -p ~/haxelib
           haxelib setup ~/haxelib
 
-      - name: Install hmm (dependency manager)
+      - name: Install hmm
         run: |
-          export PATH="/tmp/haxe_4.3.6:/tmp/neko-2.3.0-darwin:$PATH"
           haxelib --global install hmm --quiet
           haxelib --global run hmm setup
 
-      - name: Install Haxe dependencies
-        run: |
-          export PATH="/tmp/haxe_4.3.6:/tmp/neko-2.3.0-darwin:$PATH"
-          haxelib run hmm install --quiet
+      - name: Install deps
+        run: haxelib run hmm install --quiet
         timeout-minutes: 30
 
-      - name: Compile hxcpp tools
+      - name: Compile hxcpp
         run: |
-          export PATH="/tmp/haxe_4.3.6:/tmp/neko-2.3.0-darwin:$PATH"
           cd $(haxelib path hxcpp | sed "s/,//g")/tools/hxcpp
           haxe compile.hxml
 
-      - name: Build for iOS (no signing)
+      - name: Build iOS (no signing)
         env:
           CODE_SIGNING_ALLOWED: NO
           CODE_SIGNING_REQUIRED: NO
           CODE_SIGN_IDENTITY: ""
           DEVELOPMENT_TEAM: ""
-        run: |
-          export PATH="/tmp/haxe_4.3.6:/tmp/neko-2.3.0-darwin:$PATH"
-          haxelib run lime build ios -release -D nosign --times
+          HXCPP_NO_COLORED_OUTPUT: "1"
+        run: haxelib run lime build ios -release -D nosign --times
         timeout-minutes: 60
 
       - name: Package IPA
         run: |
           APP_PATH="export/release/ios/build/Release-iphoneos/Funkin.app"
           if [ ! -d "$APP_PATH" ]; then
-            echo "App not found at default path, searching..."
+            echo "App not found at $APP_PATH, searching..."
+            find export/release/ios/build -name "Funkin.app" -type d 2>/dev/null || true
+            find export -name "*.app" -type d 2>/dev/null || true
             APP_PATH=$(find export -name "Funkin.app" -type d 2>/dev/null | head -1)
             if [ -z "$APP_PATH" ]; then
-              echo "ERROR: Funkin.app not found"
-              find export -name "*.app" -type d 2>/dev/null || true
+              echo "ERROR: Funkin.app not found anywhere"
               exit 1
             fi
           fi
-          echo "Found: $APP_PATH"
+          echo "Found app at: $APP_PATH"
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
           zip -r FNF_0.7.4_iOS.ipa Payload/
           ls -lh FNF_0.7.4_iOS.ipa
 
-      - name: Upload IPA artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: FNF_0.7.4_iOS
