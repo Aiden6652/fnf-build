@@ -1,4 +1,5 @@
 name: Build FNF iOS IPA
+
 on:
   workflow_dispatch:
   push:
@@ -6,70 +7,93 @@ on:
 
 jobs:
   build-ios:
-    runs-on: macos-13
+    runs-on: macos-latest
     timeout-minutes: 120
+    env:
+      NEKOPATH: /opt/homebrew/lib/neko
+      HAXE_STD_PATH: /opt/homebrew/lib/haxe/std
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
       - name: Clone asset and art repos
         run: |
           git clone --depth 1 https://github.com/FunkinCrew/Funkin.assets assets
           git clone --depth 1 https://github.com/FunkinCrew/Funkin.art art
 
-      - name: Install Haxe
-        uses: krdlab/setup-haxe@v1
-        with:
-          haxe-version: 4.3.6
-
-      - name: Setup haxelib
+      - name: Install Haxe and Neko via Homebrew
         run: |
+          brew install neko
+          brew install haxe
+          echo "NEKOPATH=/opt/homebrew/lib/neko" >> $GITHUB_ENV
+          echo "HAXE_STD_PATH=/opt/homebrew/lib/haxe/std" >> $GITHUB_ENV
+          haxe --version
           mkdir -p ~/haxelib
           haxelib setup ~/haxelib
 
-      - name: Install hmm
+      - name: Install hmm (dependency manager)
         run: |
           haxelib --global install hmm --quiet
           haxelib --global run hmm setup
 
-      - name: Install deps
+      - name: Install Haxe dependencies
         run: haxelib run hmm install --quiet
         timeout-minutes: 30
 
-      - name: Compile hxcpp
+      - name: Patch project.hxp to disable code signing
         run: |
-          cd $(haxelib path hxcpp | sed "s/,//g")/tools/hxcpp
-          haxe compile.hxml
+          # Remove team-id and disable signing requirements
+          sed -i '' 's/config.set("ios.team-id", IOS_TEAM_ID);/config.set("ios.team-id", "");/' project.hxp
+          # Verify the change
+          grep -n "team-id" project.hxp || echo "team-id line not found"
 
-      - name: Build iOS (no signing)
+      - name: Build for iOS (no signing)
         env:
           CODE_SIGNING_ALLOWED: NO
           CODE_SIGNING_REQUIRED: NO
           CODE_SIGN_IDENTITY: ""
           DEVELOPMENT_TEAM: ""
-          HXCPP_NO_COLORED_OUTPUT: "1"
+          PROVISIONING_PROFILE_SPECIFIER: ""
         run: haxelib run lime build ios -release -D nosign --times
-        timeout-minutes: 60
+        timeout-minutes: 90
+
+      - name: Patch Xcode project if build generated it
+        if: failure()
+        run: |
+          # If lime generated the xcodeproj but failed at signing, try building directly
+          if [ -d "export/release/ios/Funkin.xcodeproj" ]; then
+            echo "Xcode project exists, patching build settings..."
+            # Use PlistBuddy to modify the project.pbxproj
+            PBXPROJ="export/release/ios/Funkin.xcodeproj/project.pbxproj"
+            sed -i '' 's/CODE_SIGN_IDENTITY = ".*"/CODE_SIGN_IDENTITY = ""/g' "$PBXPROJ"
+            sed -i '' 's/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g' "$PBXPROJ"
+            sed -i '' 's/DEVELOPMENT_TEAM = ".*"/DEVELOPMENT_TEAM = ""/g' "$PBXPROJ"
+            sed -i '' 's/PROVISIONING_PROFILE_SPECIFIER = ".*"/PROVISIONING_PROFILE_SPECIFIER = ""/g' "$PBXPROJ"
+            # Try building with xcodebuild directly
+            xcodebuild -project export/release/ios/Funkin.xcodeproj -scheme Funkin -configuration Release -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" PROVISIONING_PROFILE_SPECIFIER=""
+          fi
 
       - name: Package IPA
         run: |
           APP_PATH="export/release/ios/build/Release-iphoneos/Funkin.app"
           if [ ! -d "$APP_PATH" ]; then
-            echo "App not found at $APP_PATH, searching..."
-            find export/release/ios/build -name "Funkin.app" -type d 2>/dev/null || true
-            find export -name "*.app" -type d 2>/dev/null || true
+            echo "App not found at default path, searching..."
             APP_PATH=$(find export -name "Funkin.app" -type d 2>/dev/null | head -1)
             if [ -z "$APP_PATH" ]; then
-              echo "ERROR: Funkin.app not found anywhere"
+              echo "ERROR: Funkin.app not found"
+              find export -name "*.app" -type d 2>/dev/null || true
+              ls -la export/release/ios/build/ 2>/dev/null || true
               exit 1
             fi
           fi
-          echo "Found app at: $APP_PATH"
+          echo "Found: $APP_PATH"
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
           zip -r FNF_0.7.4_iOS.ipa Payload/
           ls -lh FNF_0.7.4_iOS.ipa
 
-      - name: Upload artifact
+      - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: FNF_0.7.4_iOS
