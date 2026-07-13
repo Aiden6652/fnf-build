@@ -32,20 +32,12 @@ jobs:
       - name: Install Haxe dependencies
         run: haxelib run hmm install --quiet
         timeout-minutes: 30
+      - name: Install xcodeproj gem
+        run: sudo gem install xcodeproj --no-document
       - name: Patch project.hxp to disable code signing
         run: |
           sed -i '' 's/config.set("ios.team-id", IOS_TEAM_ID);/config.set("ios.team-id", "");/' project.hxp
           grep -n "team-id" project.hxp
-      - name: Find and patch lime source
-        continue-on-error: true
-        run: |
-          echo "=== Searching for allowProvisioningUpdates ==="
-          grep -rl "allowProvisioningUpdates" .haxelib/ ~/haxelib/ 2>/dev/null || true
-          grep -rl "allowProvisioningUpdates" .haxelib/ ~/haxelib/ 2>/dev/null | while read f; do
-            echo "Patching: $f"
-            sed -i '' 's/ -allowProvisioningUpdates//g; s/ -allowProvisioningDeviceRegistration//g' "$f"
-          done || true
-          echo "Lime patch step done"
       - name: List Xcode version
         run: xcodebuild -version
       - name: Build for iOS (lime build, may fail at xcodebuild)
@@ -57,7 +49,7 @@ jobs:
           DEVELOPMENT_TEAM: ""
         run: haxelib run lime build ios -release -D nosign --times
         timeout-minutes: 90
-      - name: Diagnose and fix pbxproj
+      - name: Fix pbxproj format with xcodeproj gem
         if: always()
         run: |
           if [ ! -d export/release/ios ]; then
@@ -65,21 +57,29 @@ jobs:
             exit 0
           fi
           cd export/release/ios
-          echo "=== plutil lint ==="
+          echo "=== Original pbxproj first line ==="
+          head -1 Funkin.xcodeproj/project.pbxproj
+          echo "=== plutil lint (before fix) ==="
           plutil -lint Funkin.xcodeproj/project.pbxproj 2>&1 || true
-          echo "=== Converting pbxproj to XML ==="
-          cp Funkin.xcodeproj/project.pbxproj Funkin.xcodeproj/project.pbxproj.bak
-          plutil -convert xml1 Funkin.xcodeproj/project.pbxproj 2>&1 && echo "XML OK" || echo "XML failed"
-          echo "=== Creating xcworkspace ==="
-          mkdir -p Funkin.xcodeproj/project.xcworkspace
-          printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<Workspace version = "1.0">' '   <FileRef location = "self:"/>' '</Workspace>' > Funkin.xcodeproj/project.xcworkspace/contents.xcworkspacedata
+          echo "=== Fixing pbxproj with Ruby xcodeproj gem ==="
+          ruby -e '
+            require "xcodeproj"
+            project_path = "Funkin.xcodeproj"
+            project = Xcodeproj::Project.open(project_path)
+            project.save
+            puts "Project re-saved successfully"
+          '
+          echo "=== pbxproj first line after fix ==="
+          head -1 Funkin.xcodeproj/project.pbxproj
+          echo "=== plutil lint (after fix) ==="
+          plutil -lint Funkin.xcodeproj/project.pbxproj 2>&1 || true
           echo "=== xcodebuild -list ==="
           xcodebuild -list -project Funkin.xcodeproj 2>&1 || true
       - name: Manual xcodebuild
         if: always()
         run: |
           if [ ! -d export/release/ios ]; then
-            echo "ERROR: No export directory, skipping xcodebuild"
+            echo "ERROR: No export directory"
             exit 1
           fi
           cd export/release/ios
