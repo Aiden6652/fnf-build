@@ -3,139 +3,73 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+
 jobs:
   build-ios:
-    runs-on: macos-14
+    runs-on: macos-13
     timeout-minutes: 120
-    env:
-      NEKOPATH: /opt/homebrew/lib/neko
-      HAXE_STD_PATH: /opt/homebrew/lib/haxe/std
     steps:
       - uses: actions/checkout@v4
+
       - name: Clone asset and art repos
         run: |
           git clone --depth 1 https://github.com/FunkinCrew/Funkin.assets assets
           git clone --depth 1 https://github.com/FunkinCrew/Funkin.art art
-      - name: Install Haxe and Neko via Homebrew
+
+      - name: Install Haxe
+        uses: krdlab/setup-haxe@v1
+        with:
+          haxe-version: 4.3.6
+
+      - name: Setup haxelib
         run: |
-          brew install neko
-          brew install haxe
-          echo "NEKOPATH=/opt/homebrew/lib/neko" >> $GITHUB_ENV
-          echo "HAXE_STD_PATH=/opt/homebrew/lib/haxe/std" >> $GITHUB_ENV
-          haxe --version
           mkdir -p ~/haxelib
           haxelib setup ~/haxelib
+
       - name: Install hmm
         run: |
           haxelib --global install hmm --quiet
           haxelib --global run hmm setup
-      - name: Install Haxe dependencies
+
+      - name: Install deps
         run: haxelib run hmm install --quiet
         timeout-minutes: 30
-      - name: Patch project.hxp to disable code signing
+
+      - name: Compile hxcpp
         run: |
-          sed -i '' 's/config.set("ios.team-id", IOS_TEAM_ID);/config.set("ios.team-id", "");/' project.hxp
-          grep -n "team-id" project.hxp
-      - name: Patch lime to remove -allowProvisioningUpdates
-        run: |
-          LIME_DIR=$(haxelib path lime 2>/dev/null | head -1)
-          echo "Lime directory: $LIME_DIR"
-          if [ -z "$LIME_DIR" ]; then
-            echo "WARNING: Could not find lime path, trying alternative..."
-            LIME_DIR=$(find ~/haxelib -name "lime" -type d -maxdepth 3 2>/dev/null | head -1)
-            echo "Found: $LIME_DIR"
-          fi
-          # Search for allowProvisioningUpdates in all files
-          echo "=== Searching for allowProvisioningUpdates ==="
-          grep -rl "allowProvisioningUpdates" "$LIME_DIR" 2>/dev/null || echo "Not found in $LIME_DIR"
-          # Also search in the hxcpp and openfl directories
-          grep -rl "allowProvisioningUpdates" ~/haxelib/ 2>/dev/null || echo "Not found in ~/haxelib"
-          # Patch any files found
-          grep -rl "allowProvisioningUpdates" ~/haxelib/ 2>/dev/null | while read f; do
-            echo "Patching: $f"
-            sed -i '' 's/ -allowProvisioningUpdates//g; s/ -allowProvisioningDeviceRegistration//g' "$f"
-            grep -n "allowProvisioning" "$f" || echo "  -> Removed successfully"
-          done
-      - name: List available Xcode versions
-        run: |
-          ls -d /Applications/Xcode*.app 2>/dev/null || true
-          xcodebuild -version
-      - name: Build for iOS (lime build, may fail at xcodebuild)
-        continue-on-error: true
-        id: lime_build
+          cd $(haxelib path hxcpp | sed "s/,//g")/tools/hxcpp
+          haxe compile.hxml
+
+      - name: Build iOS (no signing)
         env:
           CODE_SIGNING_ALLOWED: NO
           CODE_SIGNING_REQUIRED: NO
           CODE_SIGN_IDENTITY: ""
           DEVELOPMENT_TEAM: ""
-          PROVISIONING_PROFILE_SPECIFIER: ""
+          HXCPP_NO_COLORED_OUTPUT: "1"
         run: haxelib run lime build ios -release -D nosign --times
-        timeout-minutes: 90
-      - name: Inspect generated Xcode project
-        if: always()
-        run: |
-          echo "=== iOS export directory ==="
-          ls -la export/release/ios/ 2>/dev/null || echo "No ios export dir"
-          echo "=== Xcode project contents ==="
-          ls -la export/release/ios/Funkin.xcodeproj/ 2>/dev/null || echo "No xcodeproj"
-          echo "=== pbxproj first 30 lines ==="
-          head -30 export/release/ios/Funkin.xcodeproj/project.pbxproj 2>/dev/null || echo "No pbxproj"
-          echo "=== pbxproj line count ==="
-          wc -l export/release/ios/Funkin.xcodeproj/project.pbxproj 2>/dev/null || true
-          echo "=== Check for C++ output ==="
-          ls -la export/release/ios/obj/ 2>/dev/null || echo "No obj dir"
-          find export/release/ios -name "*.cpp" -type f 2>/dev/null | head -5 || echo "No cpp files"
-          echo "=== Check for Haxe output ==="
-          find export/release/ios -name "*.h" -type f 2>/dev/null | head -5 || echo "No h files"
-      - name: Manual xcodebuild (without provisioning updates)
-        id: manual_xcodebuild
-        run: |
-          cd export/release/ios
-          echo "=== Running xcodebuild manually ==="
-          xcodebuild -configuration Release \
-            -project Funkin.xcodeproj \
-            -sdk iphoneos \
-            build \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM="" \
-            PROVISIONING_PROFILE_SPECIFIER="" 2>&1
-          echo "xcodebuild exit code: $?"
+        timeout-minutes: 60
+
       - name: Package IPA
-        if: always()
         run: |
-          APP_PATH=""
-          # Search for the .app file in multiple locations
-          for f in export/release/ios/build/Release-iphoneos/Funkin.app \
-                   export/release/ios/build/Release-iphoneos/*.app; do
-            if [ -d "$f" ]; then
-              APP_PATH="$f"
-              break
+          APP_PATH="export/release/ios/build/Release-iphoneos/Funkin.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "App not found at $APP_PATH, searching..."
+            find export/release/ios/build -name "Funkin.app" -type d 2>/dev/null || true
+            find export -name "*.app" -type d 2>/dev/null || true
+            APP_PATH=$(find export -name "Funkin.app" -type d 2>/dev/null | head -1)
+            if [ -z "$APP_PATH" ]; then
+              echo "ERROR: Funkin.app not found anywhere"
+              exit 1
             fi
-          done
-          # Also search recursively
-          if [ -z "$APP_PATH" ]; then
-            APP_PATH=$(find export/release/ios/build -name "*.app" -type d 2>/dev/null | head -1)
           fi
-          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
-            echo "ERROR: No .app found!"
-            echo "=== Searching for .app files ==="
-            find export/release/ios -name "*.app" -type d 2>/dev/null || true
-            echo "=== build directory ==="
-            ls -laR export/release/ios/build/ 2>/dev/null | head -50 || true
-            echo "=== All directories in export ==="
-            find export/release/ios -type d -maxdepth 3 2>/dev/null || true
-            exit 1
-          fi
-          echo "Found app: $APP_PATH"
-          ls -la "$APP_PATH/"
+          echo "Found app at: $APP_PATH"
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
-          zip -r FNF_0.7.4_iOS.ipa Payload
+          zip -r FNF_0.7.4_iOS.ipa Payload/
           ls -lh FNF_0.7.4_iOS.ipa
-      - name: Upload IPA artifact
-        if: always()
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: FNF_0.7.4_iOS
