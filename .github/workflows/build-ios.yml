@@ -1,4 +1,4 @@
-name: Build FNF iOS IPA (macos-14)
+name: Build FNF iOS IPA
 on:
   workflow_dispatch:
   push:
@@ -37,13 +37,15 @@ jobs:
           sed -i '' 's/config.set("ios.team-id", IOS_TEAM_ID);/config.set("ios.team-id", "");/' project.hxp
           grep -n "team-id" project.hxp
       - name: Find and patch lime source
+        continue-on-error: true
         run: |
           echo "=== Searching for allowProvisioningUpdates ==="
-          grep -rl "allowProvisioningUpdates" .haxelib/ ~/haxelib/ 2>/dev/null || echo "Not found"
+          grep -rl "allowProvisioningUpdates" .haxelib/ ~/haxelib/ 2>/dev/null || true
           grep -rl "allowProvisioningUpdates" .haxelib/ ~/haxelib/ 2>/dev/null | while read f; do
             echo "Patching: $f"
             sed -i '' 's/ -allowProvisioningUpdates//g; s/ -allowProvisioningDeviceRegistration//g' "$f"
-          done
+          done || true
+          echo "Lime patch step done"
       - name: List Xcode version
         run: xcodebuild -version
       - name: Build for iOS (lime build, may fail at xcodebuild)
@@ -58,6 +60,10 @@ jobs:
       - name: Diagnose and fix pbxproj
         if: always()
         run: |
+          if [ ! -d export/release/ios ]; then
+            echo "ERROR: export/release/ios directory does not exist"
+            exit 0
+          fi
           cd export/release/ios
           echo "=== plutil lint ==="
           plutil -lint Funkin.xcodeproj/project.pbxproj 2>&1 || true
@@ -70,7 +76,12 @@ jobs:
           echo "=== xcodebuild -list ==="
           xcodebuild -list -project Funkin.xcodeproj 2>&1 || true
       - name: Manual xcodebuild
+        if: always()
         run: |
+          if [ ! -d export/release/ios ]; then
+            echo "ERROR: No export directory, skipping xcodebuild"
+            exit 1
+          fi
           cd export/release/ios
           xcodebuild -configuration Release -project Funkin.xcodeproj -sdk iphoneos build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" PROVISIONING_PROFILE_SPECIFIER="" 2>&1
       - name: Package IPA
