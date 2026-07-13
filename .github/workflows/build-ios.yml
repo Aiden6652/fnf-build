@@ -14,12 +14,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Clone asset and art repos
         run: |
-          git init assets
-          cd assets
-          git remote add origin https://github.com/FunkinCrew/Funkin.assets
-          git fetch --depth 1 origin ca4d97554f9e
-          git checkout FETCH_HEAD
-          cd ..
+          curl -sL https://github.com/FunkinCrew/Funkin.assets/archive/ca4d97554f9e.zip -o /tmp/assets.zip
+          unzip -q /tmp/assets.zip -d /tmp/
+          mv /tmp/Funkin.assets-ca4d97554f9e assets
+          rm /tmp/assets.zip
+          echo "Assets cloned at commit ca4d97554f9e"
+          ls assets/exclude/data/ui/chart-editor/toolboxes/metadata.xml
           git clone --depth 1 https://github.com/FunkinCrew/Funkin.art art
       - name: Install Haxe and Neko via Homebrew
         run: |
